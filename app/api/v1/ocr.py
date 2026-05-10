@@ -1,0 +1,73 @@
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+
+from app.core.config import settings
+from app.core.dependencies import get_ocr_service
+from app.schemas.ocr import (
+    DocumentOCRResult,
+    DocumentType,
+    OCRJobStatus,
+    OCRJobSubmitted,
+)
+from app.services.ocr_service import OCRService
+
+router = APIRouter()
+
+
+@router.post(
+    "/extract",
+    response_model=DocumentOCRResult,
+    summary="Synchronous OCR — extract structured fields from an ID document",
+    description=(
+        "Runs the full pipeline synchronously: decode → quality check → "
+        "preprocess → PaddleOCR → detect document type → extract name/DOB/number. "
+        "Use `/extract/async` for large images or when you need immediate HTTP response."
+    ),
+)
+async def extract_document(
+    file: UploadFile = File(..., description="ID document image (JPEG, PNG, WebP, BMP)"),
+    doc_type: DocumentType | None = Query(
+        default=None,
+        description="Optional hint to skip auto-detection: 'passport' or 'nic'",
+    ),
+    service: OCRService = Depends(get_ocr_service),
+) -> DocumentOCRResult:
+    image_bytes = await file.read()
+    return await service.extract_document(image_bytes, doc_type_hint=doc_type)
+
+
+@router.post(
+    "/extract/async",
+    response_model=OCRJobSubmitted,
+    status_code=202,
+    summary="Asynchronous OCR — enqueue job and return immediately",
+    description=(
+        "Performs a fast quality pre-check (decode + resolution), then enqueues the "
+        "full OCR pipeline to a Redis/RQ worker. Returns a job ID to poll. "
+        "Preferred for WebRTC frame batches or when the HTTP timeout is a concern."
+    ),
+)
+async def extract_document_async(
+    request: Request,
+    file: UploadFile = File(..., description="ID document image"),
+    doc_type: DocumentType | None = Query(default=None),
+    service: OCRService = Depends(get_ocr_service),
+) -> OCRJobSubmitted:
+    image_bytes = await file.read()
+    base_url = str(request.base_url).rstrip("/")
+    return await service.enqueue_extraction(image_bytes, doc_type_hint=doc_type, request_base_url=base_url)
+
+
+@router.get(
+    "/jobs/{job_id}",
+    response_model=OCRJobStatus,
+    summary="Poll an async OCR job",
+    description=(
+        "Returns current status: queued | started | finished | failed. "
+        "Poll until status == 'finished', then read `result` for the DocumentOCRResult."
+    ),
+)
+async def get_job_status(
+    job_id: str,
+    service: OCRService = Depends(get_ocr_service),
+) -> OCRJobStatus:
+    return await service.get_job_result(job_id)

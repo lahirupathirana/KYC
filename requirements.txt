@@ -1,0 +1,37 @@
+# ── Web framework ────────────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.18
+
+# ── Config & validation ──────────────────────────────────────────────────────
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# ── Async HTTP client (inter-service calls to Frappe) ────────────────────────
+httpx==0.28.1
+
+# ── Redis ────────────────────────────────────────────────────────────────────
+redis[asyncio]==5.2.1
+rq==1.16.2
+
+# ── Structured logging ───────────────────────────────────────────────────────
+structlog==24.4.0
+
+# ── Computer vision ──────────────────────────────────────────────────────────
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+Pillow==11.0.0
+
+# ── AI / ML  (framework deps — torch & onnxruntime installed separately)
+# Face recognition
+insightface==0.7.3
+
+# OCR  (paddlepaddle or paddlepaddle-gpu installed separately)
+paddleocr==2.8.1
+
+# Speech-to-text
+openai-whisper==20231117
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+pytest==8.3.3
+pytest-asyncio==0.24.0

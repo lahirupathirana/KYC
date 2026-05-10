@@ -1,0 +1,20 @@
+# GPU framework overrides — install BEFORE requirements.txt to avoid CPU/GPU conflicts.
+#
+# Local GPU dev:
+#   pip install -r requirements-gpu.txt
+#   pip install -r requirements.txt
+#
+# Docker: handled by the Dockerfile (no manual step needed).
+
+# ── PyTorch with CUDA 12.1 ───────────────────────────────────────────────────
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.4.1+cu121
+torchvision==0.19.1+cu121
+torchaudio==2.4.1+cu121
+
+# ── ONNX Runtime GPU (required by InsightFace) ───────────────────────────────
+onnxruntime-gpu==1.19.2
+
+# ── PaddlePaddle GPU (required by PaddleOCR) ─────────────────────────────────
+# CUDA 12.x post-build; adjust post-fix if your CUDA version differs.
+paddlepaddle-gpu==2.6.1.post120

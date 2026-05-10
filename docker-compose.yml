@@ -1,0 +1,68 @@
+version: "3.9"
+
+# ── Services ──────────────────────────────────────────────────────────────────
+services:
+
+  ai_service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kyc_ai_service
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - models_data:/models        # persistent model cache (survives rebuilds)
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]   # remove this block to run CPU-only
+    restart: unless-stopped
+
+  # Long-running inference tasks (Whisper, batch OCR) are offloaded here
+  redis_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kyc_redis_worker
+    command: ["python3.11", "-m", "app.workers.redis_worker"]
+    env_file: .env
+    volumes:
+      - models_data:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: kyc_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  models_data:    # AI model weights — avoid re-downloading on every restart
+  redis_data:     # RQ job queue persistence
