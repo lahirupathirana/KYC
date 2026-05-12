@@ -2,8 +2,10 @@
 Light image preparation for face recognition.
 
 InsightFace (buffalo_l) was trained on naturalistic RGB images.
-Heavy filters (CLAHE, sharpening, denoising) hurt embedding quality.
-Only correct severe under/over-exposure before passing to the model.
+Heavy filters hurt embedding quality, so we apply only two treatments:
+  1. Gamma correction for severe under/over-exposure.
+  2. Unsharp masking as a fallback when sharpness fails the quality check —
+     enhances edges without altering the global texture ArcFace relies on.
 """
 
 from __future__ import annotations
@@ -43,3 +45,20 @@ def maybe_correct_gamma(img: np.ndarray) -> np.ndarray:
         [((i / 255.0) ** gamma) * 255 for i in range(256)], dtype=np.uint8
     )
     return cv2.LUT(img, table)
+
+
+def enhance_for_recognition(img: np.ndarray) -> np.ndarray:
+    """
+    Unsharp masking — sharpens edges in blurry document / camera photos.
+
+    Applied automatically in pipeline.py when the initial sharpness check
+    fails but everything else passes (face detected, size ok, pose ok).
+
+    Strength is deliberately moderate (1.5 / -0.5) to avoid introducing
+    ringing artefacts that degrade ArcFace embedding accuracy.
+    """
+    import cv2
+
+    blurred = cv2.GaussianBlur(img, (0, 0), 2.5)
+    sharpened = cv2.addWeighted(img, 1.5, blurred, -0.5, 0)
+    return np.clip(sharpened, 0, 255).astype(np.uint8)

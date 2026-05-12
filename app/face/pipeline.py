@@ -15,7 +15,7 @@ import time
 import numpy as np
 
 from app.core.config import Settings
-from app.face.preprocessing import decode_image, maybe_correct_gamma
+from app.face.preprocessing import decode_image, enhance_for_recognition, maybe_correct_gamma
 from app.face.quality import analyse_face_quality
 from app.schemas.face import (
     DetectedFace,
@@ -49,6 +49,29 @@ def analyse_single(
         max_pose_yaw=settings.face_max_pose_yaw,
         max_pose_pitch=settings.face_max_pose_pitch,
     )
+
+    # Auto-enhance: if sharpness is the ONLY failure, apply unsharp masking
+    # and re-run detection. Pose / size / score failures are not retried because
+    # sharpening cannot fix them and would waste inference time.
+    if (
+        not quality.passed
+        and quality.face_detected
+        and all("blurry" in issue.lower() or "Multiple" in issue for issue in quality.issues)
+    ):
+        img = enhance_for_recognition(img)
+        faces = model.get(img)
+        quality = analyse_face_quality(
+            faces,
+            img,
+            min_detection_score=settings.face_min_detection_score,
+            min_size_px=settings.face_min_size_px,
+            min_sharpness=settings.face_min_sharpness,
+            max_pose_yaw=settings.face_max_pose_yaw,
+            max_pose_pitch=settings.face_max_pose_pitch,
+        )
+        # Mark that enhancement was applied so callers can see it in logs
+        if quality.passed:
+            quality.issues.append("auto-enhanced: unsharp mask applied")
 
     detected_face: DetectedFace | None = None
 
