@@ -8,6 +8,11 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: kyc_ai_service
+    command: ["uvicorn", "app.main:app",
+              "--host", "0.0.0.0",
+              "--port", "8000",
+              "--workers", "4",
+              "--log-level", "info"]
     ports:
       - "8000:8000"
     env_file: .env
@@ -16,13 +21,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]   # remove this block to run CPU-only
     restart: unless-stopped
 
   # Long-running inference tasks (Whisper, batch OCR) are offloaded here
@@ -38,13 +36,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     restart: unless-stopped
 
   redis:
