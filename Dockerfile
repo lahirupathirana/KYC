@@ -37,7 +37,12 @@ RUN pip install \
         torchaudio==2.4.1 \
         --index-url https://download.pytorch.org/whl/cpu
 
-# Application requirements (ML frameworks already present above)
+# openai-whisper uses a legacy setup.py that imports pkg_resources inside
+# pip's isolated build env — which doesn't inherit setuptools from the venv.
+# --no-build-isolation reuses the current venv (where setuptools is present).
+RUN pip install --no-build-isolation openai-whisper==20231117
+
+# Remaining application requirements (whisper already satisfied, pip skips it)
 RUN pip install -r requirements.txt
 
 # ════════════════════════════════════════════════════════════════════════════
