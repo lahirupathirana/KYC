@@ -210,6 +210,7 @@ FACE_MATCH_THRESHOLD=0.40      # >= this → MATCH verdict
 FACE_REVIEW_THRESHOLD=0.20     # >= this (and < match) → REVIEW verdict
 FACE_MIN_DETECTION_SCORE=0.70  # discard detections below this confidence
 FACE_MIN_SIZE_PX=80            # reject faces smaller than 80×80 pixels
+FACE_MIN_SHARPNESS=10.0        # ID card photos score 15-25; live selfies score 40+
 FACE_MAX_POSE_YAW=35.0         # maximum head turn (degrees)
 FACE_MAX_POSE_PITCH=30.0       # maximum head tilt up/down (degrees)
 
@@ -729,7 +730,7 @@ curl -X POST http://localhost:8000/api/v1/face/analyze \
 |---|---|---|
 | Detection confidence | ≥ 0.70 | `FACE_MIN_DETECTION_SCORE` |
 | Face size | ≥ 80px | `FACE_MIN_SIZE_PX` |
-| Face sharpness (Laplacian) | ≥ 30 | — |
+| Face sharpness (Laplacian variance) | ≥ 10.0 | `FACE_MIN_SHARPNESS` |
 | Head yaw (left/right turn) | ≤ 35° | `FACE_MAX_POSE_YAW` |
 | Head pitch (up/down tilt) | ≤ 30° | `FACE_MAX_POSE_PITCH` |
 

@@ -19,6 +19,7 @@ def analyse_face_quality(
     *,
     min_detection_score: float,
     min_size_px: int,
+    min_sharpness: float,
     max_pose_yaw: float,
     max_pose_pitch: float,
 ) -> FaceQualityReport:
@@ -60,7 +61,7 @@ def analyse_face_quality(
     x1, y1, x2, y2 = (max(0, int(v)) for v in bbox)
     crop = img[y1:y2, x1:x2]
     sharpness = _laplacian_variance(crop)
-    if sharpness < 30.0:
+    if sharpness < min_sharpness:
         issues.append(f"Face region is blurry (sharpness={sharpness:.1f})")
 
     # Brightness of crop

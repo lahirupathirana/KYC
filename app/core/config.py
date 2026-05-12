@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     face_review_threshold: float = 0.20  # ≥ this → REVIEW; < this → NO_MATCH
     face_min_detection_score: float = 0.70
     face_min_size_px: int = 80           # minimum face side in pixels
+    face_min_sharpness: float = 10.0     # ID card photos score 15-25; live selfies 40+
     face_max_pose_yaw: float = 35.0      # degrees
     face_max_pose_pitch: float = 30.0    # degrees
 

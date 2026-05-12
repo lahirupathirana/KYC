@@ -45,21 +45,28 @@ def analyse_single(
         img,
         min_detection_score=settings.face_min_detection_score,
         min_size_px=settings.face_min_size_px,
+        min_sharpness=settings.face_min_sharpness,
         max_pose_yaw=settings.face_max_pose_yaw,
         max_pose_pitch=settings.face_max_pose_pitch,
     )
 
     detected_face: DetectedFace | None = None
-    embedding: list[float] | None = None
 
     if quality.face_detected:
         best = max(faces, key=lambda f: f.det_score)
         bbox = best.bbox.tolist()
-        embedding = best.embedding.tolist()
+
+        # Explicitly L2-normalise — buffalo_l may return unnormalised embeddings
+        # depending on InsightFace version. Normalising here guarantees that
+        # dot product == cosine similarity in match_faces().
+        raw = best.embedding.astype(np.float32)
+        norm = np.linalg.norm(raw)
+        emb_normalised = (raw / norm if norm > 0 else raw).tolist()
+
         detected_face = DetectedFace(
             bbox=bbox,
             detection_score=float(best.det_score),
-            embedding=embedding,
+            embedding=emb_normalised,
         )
 
     return FaceAnalysisResult(
