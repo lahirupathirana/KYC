@@ -22,6 +22,9 @@ ENV PATH="/venv/bin:$PATH"
 WORKDIR /install
 COPY requirements.txt .
 
+# slim-bookworm doesn't ship setuptools — install it before anything else
+RUN pip install --upgrade pip setuptools wheel
+
 # CPU-only ML frameworks — must be installed before requirements.txt
 # so pip sees them as already satisfied and skips re-download.
 RUN pip install paddlepaddle==2.6.2
