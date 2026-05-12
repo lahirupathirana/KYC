@@ -49,16 +49,22 @@ def maybe_correct_gamma(img: np.ndarray) -> np.ndarray:
 
 def enhance_for_recognition(img: np.ndarray) -> np.ndarray:
     """
-    Unsharp masking — sharpens edges in blurry document / camera photos.
+    Two-pass enhancement for blurry document / camera-photographed ID faces.
 
-    Applied automatically in pipeline.py when the initial sharpness check
-    fails but everything else passes (face detected, size ok, pose ok).
+    Pass 1 — denoise: bilateral filter preserves edges while removing camera
+              noise that makes the Laplacian variance misleadingly low.
+    Pass 2 — unsharp mask: sharpens edges using a wide Gaussian so fine
+              texture (skin, hair) is enhanced without ringing artefacts.
 
-    Strength is deliberately moderate (1.5 / -0.5) to avoid introducing
-    ringing artefacts that degrade ArcFace embedding accuracy.
+    Applied automatically in pipeline.py only when sharpness is the sole
+    quality failure — never applied unconditionally.
     """
     import cv2
 
-    blurred = cv2.GaussianBlur(img, (0, 0), 2.5)
-    sharpened = cv2.addWeighted(img, 1.5, blurred, -0.5, 0)
+    # Bilateral filter: smooth noise while keeping face edges crisp
+    denoised = cv2.bilateralFilter(img, d=9, sigmaColor=75, sigmaSpace=75)
+
+    # Unsharp mask on the denoised result
+    blurred = cv2.GaussianBlur(denoised, (0, 0), 3.0)
+    sharpened = cv2.addWeighted(denoised, 1.8, blurred, -0.8, 0)
     return np.clip(sharpened, 0, 255).astype(np.uint8)
