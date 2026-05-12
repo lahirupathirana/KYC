@@ -43,8 +43,11 @@ def get_ocr_service(registry: ModelRegistry = Depends(get_model_registry)) -> OC
     return OCRService(registry)
 
 
-def get_face_service(registry: ModelRegistry = Depends(get_model_registry)) -> FaceService:
-    return FaceService(registry)
+def get_face_service(
+    registry: ModelRegistry = Depends(get_model_registry),
+    cfg: Settings = Depends(get_settings),
+) -> FaceService:
+    return FaceService(registry, cfg)
 
 
 def get_liveness_service(registry: ModelRegistry = Depends(get_model_registry)) -> LivenessService:
