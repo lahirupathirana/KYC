@@ -22,11 +22,11 @@ ENV PATH="/venv/bin:$PATH"
 WORKDIR /install
 COPY requirements.txt .
 
-# slim-bookworm doesn't ship setuptools — install it before anything else
-RUN pip install --upgrade pip setuptools wheel
+# Pin setuptools to 69.5.1 — newer versions (75+) changed how pkg_resources
+# is exposed inside exec() which breaks openai-whisper's legacy setup.py.
+RUN pip install --upgrade pip "setuptools==69.5.1" wheel
 
-# CPU-only ML frameworks — must be installed before requirements.txt
-# so pip sees them as already satisfied and skips re-download.
+# CPU-only ML frameworks — installed before requirements.txt so pip skips them.
 RUN pip install paddlepaddle==2.6.2
 
 RUN pip install onnxruntime==1.19.2
@@ -37,12 +37,12 @@ RUN pip install \
         torchaudio==2.4.1 \
         --index-url https://download.pytorch.org/whl/cpu
 
-# openai-whisper uses a legacy setup.py that imports pkg_resources inside
-# pip's isolated build env — which doesn't inherit setuptools from the venv.
-# --no-build-isolation reuses the current venv (where setuptools is present).
+# openai-whisper's setup.py imports pkg_resources at the top level.
+# --no-build-isolation reuses the current venv (setuptools 69.5.1 with
+# pkg_resources) instead of creating a fresh isolated build environment.
 RUN pip install --no-build-isolation openai-whisper==20231117
 
-# Remaining application requirements (whisper already satisfied, pip skips it)
+# Remaining application requirements (whisper already satisfied above)
 RUN pip install -r requirements.txt
 
 # ════════════════════════════════════════════════════════════════════════════
