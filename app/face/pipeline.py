@@ -50,9 +50,9 @@ def analyse_single(
         max_pose_pitch=settings.face_max_pose_pitch,
     )
 
-    # Auto-enhance: if sharpness is the ONLY failure, apply unsharp masking
-    # and re-run detection. Pose / size / score failures are not retried because
-    # sharpening cannot fix them and would waste inference time.
+    # Auto-enhance: if sharpness (or glare) is the ONLY failure, apply
+    # CLAHE + bilateral filter + unsharp mask and re-run detection.
+    # Handles glasses reflections and blurry document photos.
     if (
         not quality.passed
         and quality.face_detected
@@ -69,7 +69,6 @@ def analyse_single(
             max_pose_yaw=settings.face_max_pose_yaw,
             max_pose_pitch=settings.face_max_pose_pitch,
         )
-        # Mark that enhancement was applied so callers can see it in logs
         if quality.passed:
             quality.issues.append("auto-enhanced: unsharp mask applied")
 
@@ -107,10 +106,16 @@ def match_faces(
     """
     Compare an ID document face with a live selfie.
 
+    Quality is informational only — similarity is computed whenever a face
+    embedding is available. This allows matching to succeed even when glasses,
+    glare, or lighting cause minor quality degradations.
+
+    Hard fails only when no face embedding can be extracted (face truly absent).
+
     Returns a FaceMatchResult with a three-tier verdict:
       MATCH     similarity ≥ face_match_threshold
       REVIEW    face_review_threshold ≤ similarity < face_match_threshold
-      NO_MATCH  similarity < face_review_threshold  (or quality failure)
+      NO_MATCH  similarity < face_review_threshold  (or no face found)
     """
     t0 = time.monotonic()
 
@@ -119,31 +124,30 @@ def match_faces(
 
     duration_ms = round((time.monotonic() - t0) * 1000, 1)
 
-    # Hard fail paths — no similarity computed
-    if not id_result.quality.passed:
+    # Hard fail only when face embedding is unavailable (face truly not detected)
+    if id_result.face is None:
         return _quality_failure(
-            "ID image quality check failed",
+            "No face found in ID document — ensure the face photo is clearly visible",
             id_result.quality,
             selfie_result.quality,
             settings,
             duration_ms,
         )
-    if not selfie_result.quality.passed:
+    if selfie_result.face is None:
         return _quality_failure(
-            "Selfie quality check failed",
+            "No face found in selfie — ensure your face is clearly visible and well-lit",
             id_result.quality,
             selfie_result.quality,
             settings,
             duration_ms,
         )
-
-    id_emb = np.array(id_result.face.embedding, dtype=np.float32)
-    selfie_emb = np.array(selfie_result.face.embedding, dtype=np.float32)
 
     # buffalo_l embeddings are L2-normalised — dot product equals cosine similarity
-    similarity = float(np.dot(id_emb, selfie_emb))
-    similarity = round(similarity, 4)
+    id_emb = np.array(id_result.face.embedding, dtype=np.float32)
+    selfie_emb = np.array(selfie_result.face.embedding, dtype=np.float32)
+    similarity = round(float(np.dot(id_emb, selfie_emb)), 4)
 
+    # Verdict is determined solely by similarity score
     if similarity >= settings.face_match_threshold:
         verdict = MatchVerdict.MATCH
         is_match = True
@@ -154,7 +158,7 @@ def match_faces(
         verdict = MatchVerdict.REVIEW
         is_match = False
         explanation = (
-            f"Similarity {similarity:.4f} is in review band "
+            f"Similarity {similarity:.4f} in review band "
             f"[{settings.face_review_threshold}, {settings.face_match_threshold})"
         )
     else:
@@ -163,6 +167,20 @@ def match_faces(
         explanation = (
             f"Similarity {similarity:.4f} < review threshold {settings.face_review_threshold}"
         )
+
+    # Append quality notes when issues exist — informational, does not change the verdict.
+    # (Allows MATCH even with glasses glare or minor blur.)
+    quality_warnings: list[str] = []
+    if not id_result.quality.passed:
+        quality_warnings += [
+            f"ID: {i}" for i in id_result.quality.issues if "auto-enhanced" not in i
+        ]
+    if not selfie_result.quality.passed:
+        quality_warnings += [
+            f"Selfie: {i}" for i in selfie_result.quality.issues if "auto-enhanced" not in i
+        ]
+    if quality_warnings:
+        explanation += f" [quality notes: {'; '.join(quality_warnings[:4])}]"
 
     return FaceMatchResult(
         verdict=verdict,

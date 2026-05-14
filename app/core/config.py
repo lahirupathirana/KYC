@@ -47,14 +47,15 @@ class Settings(BaseSettings):
     ocr_cpu_threads: int = 4   # set to your vCPU count
 
     # Face recognition thresholds (buffalo_l / ArcFace R100, cosine similarity)
-    # LFW benchmark: TAR@FAR=0.1% ≈ 0.363; conservative defaults below.
-    face_match_threshold: float = 0.40   # ≥ this → MATCH
-    face_review_threshold: float = 0.20  # ≥ this → REVIEW; < this → NO_MATCH
+    # LFW benchmark: TAR@FAR=0.1% ≈ 0.363.
+    # Cross-condition pairs (glasses on/off, lighting change): typically 0.35-0.65.
+    face_match_threshold: float = 0.35   # ≥ this → MATCH  (lowered from 0.40 for glasses tolerance)
+    face_review_threshold: float = 0.18  # ≥ this → REVIEW; < this → NO_MATCH
     face_min_detection_score: float = 0.70
     face_min_size_px: int = 80           # minimum face side in pixels
-    face_min_sharpness: float = 5.0      # ID/passport photos score 15-25; live selfies 40+
-    face_max_pose_yaw: float = 35.0      # degrees
-    face_max_pose_pitch: float = 30.0    # degrees
+    face_min_sharpness: float = 3.0      # quality warning threshold; match still proceeds if face detected
+    face_max_pose_yaw: float = 40.0      # degrees (relaxed for natural selfie poses)
+    face_max_pose_pitch: float = 35.0    # degrees
 
     # Inference
     max_image_size_mb: int = 10
