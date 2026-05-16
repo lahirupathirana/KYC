@@ -36,16 +36,34 @@ class NICFields:
 
 # ── Patterns ──────────────────────────────────────────────────────────────────
 
-_OLD_NIC_RE = re.compile(r"\b(\d{9})[VvXx]\b")
-_NEW_NIC_RE = re.compile(r"\b(\d{12})\b")
+# Use (?<!\d) / (?!\d) instead of \b so digits embedded in text like
+# "No198726501608" are still matched (o→1 has no \b word boundary).
+_OLD_NIC_RE = re.compile(r"(?<!\d)(\d{9})[VvXx](?!\w)")
+_NEW_NIC_RE = re.compile(r"(?<!\d)(\d{12})(?!\d)")
 
 _DATE_LABEL_RE = re.compile(
-    r"(?:DATE\s+OF\s+BIRTH|D\.O\.B\.?|DOB|BORN)[:\s]*"
+    r"(?:DATE\s*OF\s*BIRTH|D\.O\.B\.?|DOB|BORN)[:\s]*"
     r"(\d{1,2}[./ -]\d{1,2}[./ -]\d{2,4}|\d{8})",
     re.IGNORECASE,
 )
 
-_NAME_LABELS = {"NAME", "FULL NAME", "NAME IN FULL", "SURNAME", "GIVEN NAMES", "INITIALS AND SURNAME"}
+# Sex keywords — covers OCR garbling of "Male"/"Female"
+_MALE_RE = re.compile(r"\bM(?:ale?|als?|aie?)\b", re.IGNORECASE)
+_FEMALE_RE = re.compile(r"\bF(?:emale?|emais?|emai[ls]?)\b", re.IGNORECASE)
+
+_NAME_LABELS = {
+    "NAME", "FULL NAME", "NAME IN FULL", "SURNAME",
+    "GIVEN NAMES", "INITIALS AND SURNAME",
+}
+
+# OCR often glues the label to the value with a colon — split on it
+_LABEL_COLON_RE = re.compile(r"^(?:Name|Full\s*Name|Initials.*Surname)\s*:\s*", re.IGNORECASE)
+
+# Keywords that should not be treated as names
+_NON_NAME_WORDS = {
+    "REPUBLIC", "IDENTITY", "NATIONAL", "CARD", "SRI", "LANKA",
+    "DEMOCRATIC", "SOCIALIST", "SIGNATURE", "HOLDER",
+}
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
@@ -54,8 +72,9 @@ def parse(text_blocks: list[dict]) -> NICFields | None:
     texts = [b["text"] for b in text_blocks]
     joined = " ".join(texts)
 
-    nic_number, dob_from_nic, sex = _extract_nic_number(joined)
+    nic_number, dob_from_nic, sex_from_nic = _extract_nic_number(joined)
     name = _extract_name(texts)
+    sex = sex_from_nic or _extract_sex(joined)
     dob = dob_from_nic or _extract_explicit_dob(joined)
 
     if not any([nic_number, name, dob]):
@@ -82,17 +101,15 @@ def _extract_nic_number(text: str) -> tuple[str | None, str | None, str | None]:
         dob, sex = _decode_old_nic(digits)
         return nic_no, dob, sex
 
-    m = _NEW_NIC_RE.search(text)
-    if m:
+    # New 12-digit format — scan all matches and pick the first valid one
+    for m in _NEW_NIC_RE.finditer(text):
         digits = m.group(1)
-        # Reject accidental 12-digit phone numbers or other sequences:
-        # valid NIC new format has year 1900-2010 and day 001-866 (500+366)
         year_candidate = int(digits[:4])
         day_candidate = int(digits[4:7])
-        if not (1900 <= year_candidate <= 2010 and 1 <= (day_candidate % 500 or day_candidate) <= 366):
-            return None, None, None
-        dob, sex = _decode_new_nic(digits)
-        return digits, dob, sex
+        effective_day = day_candidate - 500 if day_candidate > 500 else day_candidate
+        if (1900 <= year_candidate <= 2025) and (1 <= effective_day <= 366):
+            dob, sex = _decode_new_nic(digits)
+            return digits, dob, sex
 
     return None, None, None
 
@@ -128,26 +145,65 @@ def _decode_new_nic(digits: str) -> tuple[str | None, str | None]:
 # ── Name extraction ───────────────────────────────────────────────────────────
 
 def _extract_name(texts: list[str]) -> str | None:
-    # Strategy 1: the token immediately after a NAME label
+    # Strategy 1: label and value in the SAME block e.g. "Name: PATHIRANAGE LAHIRU SAMAN"
+    for t in texts:
+        after = _LABEL_COLON_RE.sub("", t).strip()
+        if after != t.strip() and _is_plausible_name(after):
+            return _clean_name(after)
+
+    # Strategy 2: label in one block, value in the next
     for i, t in enumerate(texts):
         upper = t.upper().strip()
         if upper in _NAME_LABELS or any(lbl in upper for lbl in _NAME_LABELS):
-            if i + 1 < len(texts):
-                candidate = texts[i + 1].strip()
-                if _is_plausible_name(candidate):
-                    return candidate.title()
+            # Also accept inline value after colon even if label check fires
+            inline = re.split(r"[:\-]\s*", t, maxsplit=1)
+            if len(inline) > 1 and _is_plausible_name(inline[1]):
+                return _clean_name(inline[1])
+            if i + 1 < len(texts) and _is_plausible_name(texts[i + 1]):
+                return _clean_name(texts[i + 1])
 
-    # Strategy 2: longest all-alpha run that looks like a proper name
+    # Strategy 3: longest all-alpha block that looks like a proper name
     candidates = [
         t.strip() for t in texts
-        if re.match(r"^[A-Z][A-Za-z .]{4,50}$", t.strip())
-        and not any(kw in t.upper() for kw in {"REPUBLIC", "IDENTITY", "NATIONAL", "CARD"})
+        if re.match(r"^[A-Z][A-Za-z .]{4,60}$", t.strip())
+        and not any(kw in t.upper().split() for kw in _NON_NAME_WORDS)
     ]
-    return max(candidates, key=len).title() if candidates else None
+    return _clean_name(max(candidates, key=len)) if candidates else None
+
+
+def _clean_name(raw: str) -> str:
+    # Remove any leading noise characters (digits, punctuation)
+    cleaned = re.sub(r"^[^A-Za-z]+", "", raw).strip()
+    # Collapse multiple spaces
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.title() if cleaned else raw.title()
 
 
 def _is_plausible_name(text: str) -> bool:
-    return bool(re.match(r"^[A-Za-z][A-Za-z\s.\-]{2,50}$", text.strip()))
+    t = text.strip()
+    return bool(re.match(r"^[A-Za-z][A-Za-z\s.\-]{2,60}$", t)) and len(t.split()) >= 1
+
+
+# ── Sex extraction ────────────────────────────────────────────────────────────
+
+def _extract_sex(text: str) -> str | None:
+    """
+    Find M/F from OCR text.
+
+    Handles garbled OCR: "Mals", "Mais", "Femais", "/SexMals", etc.
+    Sex derived from the NIC number itself (in _extract_nic_number) takes
+    priority over this text-based extraction.
+    """
+    if _FEMALE_RE.search(text):
+        return "F"
+    if _MALE_RE.search(text):
+        return "M"
+    # Fallback: explicit single-letter field label
+    if re.search(r"\bSex\s*[:\-]?\s*F\b", text, re.IGNORECASE):
+        return "F"
+    if re.search(r"\bSex\s*[:\-]?\s*M\b", text, re.IGNORECASE):
+        return "M"
+    return None
 
 
 # ── Explicit DOB extraction (fallback) ───────────────────────────────────────
