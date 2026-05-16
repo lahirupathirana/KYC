@@ -34,3 +34,10 @@ paddleocr==2.8.1
 # ── Testing ──────────────────────────────────────────────────────────────────
 pytest==8.3.3
 pytest-asyncio==0.24.0
+
+# ── Dataset generation & augmentation ────────────────────────────────────────
+# Pillow already listed above (document image rendering)
+albumentations==1.4.22       # heavy augmentation pipeline (optional, falls back to OpenCV)
+
+# ── Evaluation ───────────────────────────────────────────────────────────────
+# httpx already listed above (API-mode evaluation client)

@@ -2,7 +2,15 @@
 Image preprocessing and quality validation for ID document scanning.
 
 Pipeline (in order):
-  decode → validate_quality → preprocess (upscale → CLAHE → denoise → deskew → sharpen)
+  decode → validate_quality → preprocess
+
+preprocess steps:
+  1. Perspective correction — detect document quad, apply homography warp
+  2. Upscale to 1400 px wide
+  3. CLAHE on LAB L-channel (local contrast)
+  4. Fast colour denoise (conservative)
+  5. Deskew via Hough line detection
+  6. Unsharp mask
 
 All functions are pure (no side effects, no model calls) and run synchronously
 inside a ThreadPoolExecutor via the service layer.
@@ -22,6 +30,10 @@ _BLUR_THRESHOLD = 60.0      # Laplacian variance; below this → blurry
 _BRIGHTNESS_MIN = 35.0      # mean gray intensity (0-255)
 _BRIGHTNESS_MAX = 220.0
 _CONTRAST_MIN = 20.0        # gray std-dev; below this → washed out / flat
+
+# Perspective correction: only warp if the document quad covers at least
+# this fraction of the image area (avoids warping on non-document images).
+_MIN_DOC_AREA_RATIO = 0.15
 
 
 @dataclass
@@ -87,15 +99,18 @@ def preprocess(img: np.ndarray) -> np.ndarray:
     Enhancement pipeline optimised for printed ID document text.
 
     Steps:
-      1. Upscale to at least 1400 px wide (PaddleOCR text detection works better
+      1. Perspective correction — detect document boundary quad and warp to
+         a flat rectangle; critical for mobile photos taken at an angle.
+      2. Upscale to at least 1400 px wide (PaddleOCR text detection works better
          at higher resolution for small fonts like MRZ lines).
-      2. CLAHE on the L channel (LAB space) — improves local contrast without
+      3. CLAHE on the L channel (LAB space) — improves local contrast without
          blowing highlights; better than global histogram equalisation.
-      3. Fast colour denoise — reduces JPEG artefacts and camera noise while
+      4. Fast colour denoise — reduces JPEG artefacts and camera noise while
          preserving sharp text edges (low h/hColor values).
-      4. Deskew — correct up to ±25° rotation using Hough line detection.
-      5. Unsharp mask — enhance edge crispness for OCR character segmentation.
+      5. Deskew — correct residual rotation using Hough line detection.
+      6. Unsharp mask — enhance edge crispness for OCR character segmentation.
     """
+    img = _correct_perspective(img)
     img = _upscale(img, target_width=1400)
     img = _apply_clahe(img)
     img = _denoise(img)
@@ -105,6 +120,90 @@ def preprocess(img: np.ndarray) -> np.ndarray:
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────
+
+def _correct_perspective(img: np.ndarray) -> np.ndarray:
+    """
+    Detect the document's four corners and warp to a flat rectangle.
+
+    Works well for mobile photos where the card or passport is lying on a
+    contrasting background (table, dark surface). Falls back to the original
+    image when no clear quad is found.
+
+    Algorithm:
+      1. Grayscale → Gaussian blur → Canny edges
+      2. Find contours sorted by area (largest first)
+      3. Approximate each contour; accept the first 4-vertex polygon that
+         covers at least _MIN_DOC_AREA_RATIO of the image area
+      4. Order corners (TL, TR, BR, BL) → four_point_transform
+    """
+    h, w = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edged = cv2.Canny(blurred, 50, 150)
+
+    contours, _ = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+    img_area = h * w
+    doc_quad: np.ndarray | None = None
+
+    for cnt in contours[:10]:
+        peri = cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+        if len(approx) == 4:
+            quad_area = cv2.contourArea(approx)
+            if quad_area / img_area >= _MIN_DOC_AREA_RATIO:
+                doc_quad = approx.reshape(4, 2).astype(np.float32)
+                break
+
+    if doc_quad is None:
+        return img
+
+    pts = _order_quad_points(doc_quad)
+    return _four_point_transform(img, pts)
+
+
+def _order_quad_points(pts: np.ndarray) -> np.ndarray:
+    """
+    Sort four (x, y) points into [TL, TR, BR, BL] order.
+
+    Top-left has the smallest sum; bottom-right has the largest sum.
+    Top-right has the smallest difference; bottom-left has the largest difference.
+    """
+    sums = pts.sum(axis=1)
+    diffs = np.diff(pts, axis=1).flatten()
+    ordered = np.zeros((4, 2), dtype=np.float32)
+    ordered[0] = pts[np.argmin(sums)]    # TL
+    ordered[2] = pts[np.argmax(sums)]    # BR
+    ordered[1] = pts[np.argmin(diffs)]   # TR
+    ordered[3] = pts[np.argmax(diffs)]   # BL
+    return ordered
+
+
+def _four_point_transform(img: np.ndarray, pts: np.ndarray) -> np.ndarray:
+    """Apply a perspective warp given ordered corner points [TL, TR, BR, BL]."""
+    tl, tr, br, bl = pts
+
+    # Compute output width: max of top and bottom edge lengths
+    width_top = float(np.linalg.norm(tr - tl))
+    width_bot = float(np.linalg.norm(br - bl))
+    out_w = max(int(width_top), int(width_bot))
+
+    # Compute output height: max of left and right edge lengths
+    height_left = float(np.linalg.norm(bl - tl))
+    height_right = float(np.linalg.norm(br - tr))
+    out_h = max(int(height_left), int(height_right))
+
+    if out_w <= 0 or out_h <= 0:
+        return img
+
+    dst = np.array(
+        [[0, 0], [out_w - 1, 0], [out_w - 1, out_h - 1], [0, out_h - 1]],
+        dtype=np.float32,
+    )
+    M = cv2.getPerspectiveTransform(pts, dst)
+    return cv2.warpPerspective(img, M, (out_w, out_h), flags=cv2.INTER_CUBIC)
+
 
 def _upscale(img: np.ndarray, target_width: int) -> np.ndarray:
     h, w = img.shape[:2]

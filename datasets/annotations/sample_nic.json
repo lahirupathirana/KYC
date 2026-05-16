@@ -1,0 +1,77 @@
+{
+  "id": 1,
+  "document_type": "nic",
+  "format": "new",
+  "source": "synthetic",
+  "augmented": false,
+  "ground_truth": {
+    "document_number": "199512300123",
+    "full_name": "Kasun Perera",
+    "dob": "1995-05-11",
+    "sex": "M"
+  },
+  "text_regions": [
+    {
+      "transcription": "SRI LANKA",
+      "field_label": "label",
+      "points": [[40, 15], [200, 15], [200, 33], [40, 33]],
+      "language": "en",
+      "confidence": 1.0
+    },
+    {
+      "transcription": "NATIONAL IDENTITY CARD",
+      "field_label": "label",
+      "points": [[40, 38], [260, 38], [260, 51], [40, 51]],
+      "language": "en",
+      "confidence": 1.0
+    },
+    {
+      "transcription": "199512300123",
+      "field_label": "document_number",
+      "points": [[200, 88], [416, 88], [416, 108], [200, 108]],
+      "language": "en",
+      "confidence": 1.0
+    },
+    {
+      "transcription": "Kasun Perera",
+      "field_label": "full_name",
+      "points": [[200, 140], [350, 140], [350, 158], [200, 158]],
+      "language": "en",
+      "confidence": 1.0
+    },
+    {
+      "transcription": "1995-05-11",
+      "field_label": "dob",
+      "points": [[200, 192], [350, 192], [350, 210], [200, 210]],
+      "language": "en",
+      "confidence": 1.0
+    },
+    {
+      "transcription": "MALE",
+      "field_label": "sex",
+      "points": [[200, 244], [265, 244], [265, 262], [200, 262]],
+      "language": "en",
+      "confidence": 1.0
+    }
+  ],
+  "bboxes": {
+    "document_number": [200, 88, 416, 108],
+    "full_name": [200, 140, 350, 158],
+    "dob": [200, 192, 350, 210],
+    "sex": [200, 244, 265, 262]
+  },
+  "document_corners": [
+    [0, 0],
+    [856, 0],
+    [856, 540],
+    [0, 540]
+  ],
+  "image_size": [856, 540],
+  "quality": {
+    "blurry": false,
+    "glare": false,
+    "low_light": false,
+    "perspective_distorted": false,
+    "partial_occlusion": false
+  }
+}
